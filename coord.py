@@ -41,7 +41,7 @@ def geodetic2ecef(lat, lon, alt):
     return(numpy.array([x, y, z]))
 
 def enu2ecef(lat, lon, alt, e, n, u):
-    """NED (north/east/down) to ECEF coordinate system conversion."""
+    """east,north,up to ECEF coordinate system conversion."""
     x, y, z = e, n, u
     lat, lon = radians(lat), radians(lon)
     mx = array([[-sin(lon), -sin(lat) * cos(lon), cos(lat) * cos(lon)],

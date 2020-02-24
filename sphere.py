@@ -12,7 +12,7 @@ import math, random
 
 def fibonacci_sphere(samples=1,randomize=False):
     """
-    Somewhat uniform grid on a sphere
+       Somewhat uniform grid on a sphere
     """
     rnd = 1.
     if randomize:
@@ -28,7 +28,7 @@ def fibonacci_sphere(samples=1,randomize=False):
         r = math.sqrt(1 - pow(y,2))
 
         phi = ((i + rnd) % samples) * increment
-
+        
         x = math.cos(phi) * r
         z = math.sin(phi) * r
 
@@ -39,9 +39,9 @@ def fibonacci_sphere(samples=1,randomize=False):
 
 class wire_grid():
     """
-    Let's do some geometry here. 
-    We assume that the ionosphere is a grid of current
-    carrying wires. 
+       Let's do some geometry here. 
+       We assume that the ionosphere is a grid of current
+       carrying wires. 
     """
     def __init__(self,N=1000,R_e=6378e3,h_e=100e3,plot=False):
         self.N=N
@@ -49,10 +49,11 @@ class wire_grid():
         # get uniformly distributed points on a sphere
         # these will act ast grid points
         points=fibonacci_sphere(samples=N)*(R_e+h_e)
-        
+
+        # triangulate before shifting points onto a geoid
         tri = Delaunay(points)
-        
-        # fit geoid
+
+        # shift points to fit geoid
         if True:
             points2=n.copy(points)
             llhs=[]
@@ -72,7 +73,6 @@ class wire_grid():
         # the list "tri" contains the wire mesh
 
         # TBD: make sure that there are no duplicated wires!
-            
         s=n.copy(tri.simplices)
 
         # these are the triangles
@@ -80,7 +80,7 @@ class wire_grid():
         
         # these are unique current carrying elements of the mesh
         wires={}
-        
+        wire_num=0
         # these are the connections between node points, in order to allow us to regularize current continuity.
         self.connections={}
         
@@ -109,10 +109,20 @@ class wire_grid():
                     if wire_id not in wires.keys():
                         del_l=points[e0,:]-points[e1,:]
                         r=points[e0,:]+0.5*del_l
+                        llh=coord.ecef2geodetic(r[0],r[1],r[2])
+                        
+                        east=coord.enu2ecef(llh[0],llh[1],0.0,1.0,0,0)
+                        north=coord.enu2ecef(llh[0],llh[1],0.0,0,1.0,0)
+                        
                         wires[wire_id]={"del_l":del_l,
+                                        "del_e":n.dot(del_l/n.linalg.norm(del_l),east),
+                                        "del_n":n.dot(del_l/n.linalg.norm(del_l),north),                                        
                                         "r":r,
+                                        "llh":llh,
+                                        "wire_num":wire_num,
                                         "e0":e0,
                                         "e1":e1}
+                        wire_num+=1
                     else:
                         pass
 
@@ -120,13 +130,68 @@ class wire_grid():
                 tris.append(tri)
             else:
                 print("middle point not in tri!")
-                
+
+        self.llhs=llhs
         self.tris=tris
         self.points=points
         self.wires=wires
-        print(len(self.points))        
-        print(len(self.wires.keys()))
+        
+    def get_wire_idx(self,e0,e1):
+        wire_id=self.get_wire_id(e0,e1)
+        return(self.wires[wire_id]["wire_num"])
+    
+    def get_wire_id(self,e0,e1):
+        e0p=n.min([e0,e1])
+        e1p=n.max([e0,e1])
+        return("%d-%d"%(e0p,e1p))
+        
+    def plot_currents(self,currents):
+        for k in self.wires.keys():
+            widx=self.wires[k]["wire_num"]
+            llh=self.wires[k]["llh"]            
+            I=currents[widx]
+            plt.plot(llh[0],I,".")
+        plt.show()
 
+    def plot_currents2(self,currents):
+        cmax=n.max(currents)
+        for k in self.wires.keys():
+            widx=self.wires[k]["wire_num"]
+            llh=self.wires[k]["llh"]            
+            I=currents[widx]
+            plt.scatter(llh[1],llh[0],s=I/10,color="black")
+        plt.show()
+        
+    def plot_currents3(self,currents):
+        cmax=n.max(currents)
+        c=10.0/cmax
+        ax = plt.axes()
+        for tri in self.tris:
+            e0=tri["edges"][0]
+            e1=tri["edges"][1]
+            e2=tri["edges"][2]
+            id0=self.get_wire_id(e0[0],e0[1])
+            id1=self.get_wire_id(e1[0],e1[1])
+            id2=self.get_wire_id(e2[0],e2[1])
+            w0=self.wires[id0]
+            w1=self.wires[id1]
+            w2=self.wires[id2]            
+
+            llh=w0["llh"]
+
+            EI0=currents[w0["wire_num"]]
+            EI1=currents[w1["wire_num"]]
+            I2=currents[w2["wire_num"]]
+
+            IE=currents[w0["wire_num"]]*w0["del_e"]+currents[w1["wire_num"]]*w1["del_e"]+currents[w2["wire_num"]]*w2["del_e"]
+            IN=currents[w0["wire_num"]]*w0["del_n"]+currents[w1["wire_num"]]*w1["del_n"]+currents[w2["wire_num"]]*w2["del_n"]
+            ax.arrow(llh[1],llh[0],IE*c,IN*c,head_width=0, head_length=0, color="k")
+            ax.plot(llh[1],llh[0],".",color="black")
+        plt.xlim([-180,180])
+        plt.ylim([-90,90])        
+        plt.show()
+        
+        
     def add_connection(self,e0,e1):
         """
         In order to treat the grid as a circuit, we need to 
@@ -191,7 +256,6 @@ class wire_grid():
             ax.plot([self.points[e0,0],self.points[e1,0]],
                     [self.points[e0,1],self.points[e1,1]],
                     [self.points[e0,2],self.points[e1,2]],color="grey")
-#            print(coord.ecef2geodetic(wire["r"][0],wire["r"][1],wire["r"][2]))
             ax.plot([wire["r"][0]],[wire["r"][1]],[wire["r"][2]],".",color="red")
             
         plt.show()                
